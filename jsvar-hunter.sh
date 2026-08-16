@@ -1,11 +1,3 @@
-VERSION="2.0.0"
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ANALYZER="$SCRIPT_DIR/lib/js_analyzer.py"
-
-VERBOSE=false
-IGNORE_CHECK=false
-
 #!/usr/bin/env bash
 
 set -euo pipefail
@@ -13,9 +5,11 @@ IFS=$'\n\t'
 
 VERSION="2.0.0"
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ANALYZER="$SCRIPT_DIR/lib/js_analyzer.py"
+
 VERBOSE=false
 IGNORE_CHECK=false
-INSECURE=false
 
 TIMEOUT=20
 FORMAT="txt"
