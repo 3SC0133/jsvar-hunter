@@ -6,7 +6,7 @@
 
 JSVar Hunter is a lightweight Bash-based tool designed to discover and analyze JavaScript resources associated with an authorized target.
 
-It combines passive URL discovery with HTTP validation and JavaScript content analysis to help security professionals identify interesting client-side artifacts during reconnaissance.
+It combines passive URL discovery, HTTP validation and JavaScript content analysis to help security professionals identify interesting client-side artifacts during reconnaissance.
 
 ## Features
 
@@ -42,7 +42,7 @@ The following tools must be available in your `PATH`:
 Recommended environment:
 
 - Linux
-- Bash 4+
+- Bash
 - Python 3
 
 ## Installation
@@ -52,7 +52,7 @@ Clone the repository:
 ```bash
 git clone https://github.com/3SC0133/jsvar-hunter.git
 cd jsvar-hunter
-````
+```
 
 Make the script executable:
 
@@ -70,6 +70,20 @@ Expected:
 
 ```text
 JSVar Hunter v2.0.0
+```
+
+## Quick Start
+
+Run JSVar Hunter against an authorized target:
+
+```bash
+./jsvar-hunter.sh example.com
+```
+
+The default report is saved using the following format:
+
+```text
+js_analysis_YYYYMMDD_HHMMSS.txt
 ```
 
 ## Usage
@@ -116,7 +130,7 @@ Save the report to a custom file:
 ./jsvar-hunter.sh example.com --output results.txt
 ```
 
-Generate JSONL inventory:
+Generate a JSONL inventory:
 
 ```bash
 ./jsvar-hunter.sh example.com \
@@ -126,23 +140,23 @@ Generate JSONL inventory:
 
 ## Command-line Options
 
-| Option            | Description                          |
-| ----------------- | ------------------------------------ |
-| `--timeout N`     | HTTP timeout in seconds              |
-| `--output FILE`   | Output file path                     |
-| `--format txt`    | Human-readable report                |
-| `--format jsonl`  | JSON Lines inventory                 |
-| `--ignore-check`  | Skip HTTP accessibility validation   |
-| `--insecure`      | Disable TLS certificate verification |
-| `-v`, `--verbose` | Enable verbose output                |
-| `-h`, `--help`    | Show help                            |
-| `--version`       | Show version                         |
+| Option | Description |
+|---|---|
+| `--timeout N` | HTTP timeout in seconds |
+| `--output FILE` | Output file path |
+| `--format txt` | Human-readable report |
+| `--format jsonl` | JSON Lines inventory |
+| `--ignore-check` | Skip HTTP accessibility validation |
+| `--insecure` | Disable TLS certificate verification |
+| `-v`, `--verbose` | Enable verbose output |
+| `-h`, `--help` | Show help |
+| `--version` | Show version |
 
 ## Analysis
 
 JSVar Hunter looks for JavaScript artifacts that may be useful during security reconnaissance.
 
-### API endpoints
+### API Endpoints
 
 Examples of indicators:
 
@@ -161,7 +175,7 @@ Example:
 wss://socket.example.com/ws
 ```
 
-### HTTP clients
+### HTTP Clients
 
 The analyzer looks for common client-side request mechanisms such as:
 
@@ -173,11 +187,11 @@ XMLHttpRequest
 jQuery.ajax(...)
 ```
 
-### Source maps
+### Source Maps
 
 Source map references can expose additional application source material and are therefore reported when discovered.
 
-### Potential secrets
+### Potential Secret Candidates
 
 The analyzer identifies strings associated with terms such as:
 
@@ -194,13 +208,15 @@ private_key
 
 These are **candidates only** and must be manually validated.
 
-A detected token-like string is not automatically a vulnerability.
+A detected token-like string is not automatically a vulnerability or a valid credential.
 
-### Console and debug information
+### Console and Debug Information
 
 Client-side logging statements are reported because they can sometimes expose useful application behavior, identifiers or debugging information.
 
 ## Output
+
+### TXT
 
 The default output is a human-readable TXT report.
 
@@ -217,13 +233,17 @@ JavaScript Inventory
 [200] https://example.com/static/app.js | application/javascript | 48231 bytes
 ```
 
-JSONL mode produces one JSON object per JavaScript resource:
+### JSONL
+
+JSONL mode produces one inventory object per JavaScript resource.
+
+Example:
 
 ```json
 {"type":"javascript","url":"https://example.com/static/app.js","http_status":200,"content_type":"application/javascript","effective_url":"https://example.com/static/app.js","size":48231}
 ```
 
-JSONL is useful when feeding results into other scripts, pipelines or security tooling.
+JSONL is useful when feeding inventory results into other scripts, pipelines or security tooling.
 
 ## Workflow
 
@@ -266,7 +286,7 @@ Report
 
 ## Security Considerations
 
-JSVar Hunter performs active HTTP requests against discovered resources.
+JSVar Hunter performs HTTP requests against discovered resources.
 
 The following options can affect how requests are performed:
 
@@ -284,10 +304,10 @@ Use them carefully and only within an authorized testing scope.
 
 JSVar Hunter is intended for:
 
-* authorized penetration testing;
-* bug bounty programs where the target is explicitly in scope;
-* security research on systems you own or have permission to test;
-* CTFs and laboratory environments.
+- Authorized penetration testing
+- Bug bounty programs where the target is explicitly in scope
+- Security research on systems you own or have permission to test
+- CTFs and laboratory environments
 
 Do not use this tool against systems without authorization.
 
@@ -327,7 +347,7 @@ Before submitting changes:
 2. Avoid unnecessary dependencies.
 3. Preserve compatibility with common Linux environments.
 4. Document behavioral changes.
-5. Test changes against authorized targets or local fixtures.
+5. Test changes against authorized targets or laboratory environments.
 
 ## License
 
