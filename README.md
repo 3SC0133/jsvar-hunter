@@ -1,10 +1,3 @@
-Próximo: **vamos fechar o `README.md`**. Não vamos criar mais código.
-
-No GitHub:
-
-**`README.md` → Edit → Ctrl+A → substitua tudo pelo conteúdo abaixo.**
-
-````markdown
 # JSVar Hunter
 
 > JavaScript attack-surface discovery and analysis tool for penetration testing, bug bounty and security research.
