@@ -5,11 +5,9 @@ IFS=$'\n\t'
 
 VERSION="2.0.0"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ANALYZER="$SCRIPT_DIR/lib/js_analyzer.py"
-
 VERBOSE=false
 IGNORE_CHECK=false
+INSECURE=false
 
 TIMEOUT=20
 FORMAT="txt"
@@ -24,18 +22,6 @@ TARGET_HOST=""
 TARGET_BASE=""
 
 CURL_ARGS=()
-
-# ============================================================================
-# Cleanup
-# ============================================================================
-
-cleanup() {
-    if [[ -n "${TEMP_DIR:-}" && -d "$TEMP_DIR" ]]; then
-        rm -rf "$TEMP_DIR"
-    fi
-}
-
-trap cleanup EXIT INT TERM
 
 # ============================================================================
 # Logging
@@ -60,14 +46,26 @@ error() {
 }
 
 # ============================================================================
+# Cleanup
+# ============================================================================
+
+cleanup() {
+    if [[ -n "${TEMP_DIR:-}" && -d "$TEMP_DIR" ]]; then
+        rm -rf "$TEMP_DIR"
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+# ============================================================================
 # Help
 # ============================================================================
 
 show_help() {
-    cat <<EOF_HELP
+    cat <<EOF
 JSVar Hunter v${VERSION}
 
-JavaScript attack-surface discovery for authorized security testing.
+JavaScript attack-surface discovery tool for authorized security testing.
 
 Usage:
   $0 <domain|url> [options]
@@ -86,13 +84,17 @@ Examples:
   $0 example.com
   $0 https://example.com --timeout 15
   $0 example.com --format jsonl --output results.jsonl
-  $0 example.com --ignore-check
+  $0 example.com --ignore-check -v
 
-Dependencies:
-  assetfinder, gau, waybackurls, curl, python3
+Requirements:
+  assetfinder
+  gau
+  waybackurls
+  curl
+  python3
 
-Only scan systems you are authorized to test.
-EOF_HELP
+Only use this tool against systems you are authorized to test.
+EOF
 }
 
 show_version() {
@@ -134,7 +136,6 @@ parse_args() {
             show_help
             exit 0
             ;;
-
         --version)
             show_version
             exit 0
@@ -147,30 +148,30 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --timeout)
-                [[ $# -ge 2 ]] || {
+                if [[ $# -lt 2 ]]; then
                     error "--timeout requires a value"
                     exit 1
-                }
+                fi
 
                 TIMEOUT="$2"
                 shift 2
                 ;;
 
             --output)
-                [[ $# -ge 2 ]] || {
+                if [[ $# -lt 2 ]]; then
                     error "--output requires a value"
                     exit 1
-                }
+                fi
 
                 OUTPUT_FILE="$2"
                 shift 2
                 ;;
 
             --format)
-                [[ $# -ge 2 ]] || {
+                if [[ $# -lt 2 ]]; then
                     error "--format requires a value"
                     exit 1
-                }
+                fi
 
                 FORMAT="$2"
                 shift 2
@@ -232,7 +233,7 @@ normalize_target() {
     local parsed
 
     parsed="$(
-        python3 - "$TARGET_INPUT" <<'PY_TARGET'
+        python3 - "$TARGET_INPUT" <<'PY'
 from urllib.parse import urlparse
 import sys
 
@@ -246,12 +247,15 @@ if "://" not in raw:
 
 parsed = urlparse(raw)
 
-if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+if parsed.scheme not in {"http", "https"}:
+    raise SystemExit(1)
+
+if not parsed.hostname:
     raise SystemExit(1)
 
 print(parsed.hostname.lower())
 print(f"{parsed.scheme}://{parsed.netloc}")
-PY_TARGET
+PY
     )" || {
         error "Invalid target: $TARGET_INPUT"
         exit 1
@@ -280,13 +284,13 @@ build_curl_args() {
 }
 
 # ============================================================================
-# JavaScript URL normalization and scope filtering
+# URL normalization and scope filtering
 # ============================================================================
 
 normalize_and_filter_js() {
     local input_file="$1"
 
-    python3 - "$TARGET_BASE" "$TARGET_HOST" "$input_file" <<'PY_FILTER'
+    python3 - "$TARGET_BASE" "$TARGET_HOST" "$input_file" <<'PY'
 from urllib.parse import urljoin, urlparse
 import sys
 
@@ -304,24 +308,23 @@ with open(input_file, "r", encoding="utf-8", errors="ignore") as handle:
         url = urljoin(base + "/", value)
         parsed = urlparse(url)
 
-        host = (parsed.hostname or "").lower()
-        path = parsed.path.lower()
-
         if parsed.scheme not in {"http", "https"}:
             continue
+
+        host = (parsed.hostname or "").lower()
 
         if not (host == target or host.endswith("." + target)):
             continue
 
-        if not (
+        path = parsed.path.lower()
+
+        if (
             path.endswith(".js")
             or ".js?" in url.lower()
             or ".js#" in url.lower()
         ):
-            continue
-
-        print(url)
-PY_FILTER
+            print(url)
+PY
 }
 
 # ============================================================================
@@ -329,16 +332,16 @@ PY_FILTER
 # ============================================================================
 
 discover_homepage_js() {
-    local html_file="$TEMP_DIR/homepage.html"
+    local homepage="$TEMP_DIR/homepage.html"
 
     log "Fetching homepage: $TARGET_BASE"
 
-    if ! curl "${CURL_ARGS[@]}" "$TARGET_BASE" -o "$html_file"; then
+    if ! curl "${CURL_ARGS[@]}" "$TARGET_BASE" -o "$homepage"; then
         warn "Unable to fetch homepage."
         return 0
     fi
 
-    python3 - "$TARGET_BASE" "$html_file" <<'PY_HTML'
+    python3 - "$TARGET_BASE" "$homepage" <<'PY'
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 import sys
@@ -347,25 +350,28 @@ base = sys.argv[1]
 filename = sys.argv[2]
 
 
-class Parser(HTMLParser):
+class JSParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
-        attributes = dict(attrs)
+        values = dict(attrs)
 
-        if tag.lower() == "script" and attributes.get("src"):
-            print(urljoin(base + "/", attributes["src"]))
+        if tag.lower() == "script":
+            src = values.get("src")
 
-        elif tag.lower() == "link" and attributes.get("href"):
-            href = attributes["href"]
+            if src:
+                print(urljoin(base + "/", src))
 
-            if ".js" in href.lower():
+        elif tag.lower() == "link":
+            href = values.get("href")
+
+            if href and ".js" in href.lower():
                 print(urljoin(base + "/", href))
 
 
-parser = Parser()
+parser = JSParser()
 
 with open(filename, "r", encoding="utf-8", errors="ignore") as handle:
     parser.feed(handle.read())
-PY_HTML
+PY
 }
 
 # ============================================================================
@@ -376,7 +382,6 @@ discover_historical_js() {
     log "Running assetfinder + gau..."
 
     assetfinder "$TARGET_HOST" 2>/dev/null |
-        sort -u |
         gau 2>/dev/null ||
         true
 
@@ -392,11 +397,11 @@ discover_historical_js() {
 
 discover_js() {
     local raw_file="$TEMP_DIR/raw_urls.txt"
-    local output_file="$TEMP_DIR/all_js_files.txt"
+    local js_file="$TEMP_DIR/all_js_files.txt"
     local count
 
     : > "$raw_file"
-    : > "$output_file"
+    : > "$js_file"
 
     info "Collecting JavaScript URLs..."
 
@@ -404,9 +409,9 @@ discover_js() {
     discover_homepage_js >> "$raw_file"
 
     normalize_and_filter_js "$raw_file" |
-        sort -u > "$output_file"
+        sort -u > "$js_file"
 
-    count="$(wc -l < "$output_file" | tr -d ' ')"
+    count="$(wc -l < "$js_file" | tr -d ' ')"
 
     info "Discovered $count unique in-scope JavaScript URLs."
 
@@ -453,8 +458,9 @@ validate_url() {
         effective_url \
         size <<< "$result"
 
-    [[ "$status" =~ ^[23][0-9][0-9]$ ]] ||
+    if ! [[ "$status" =~ ^[23][0-9][0-9]$ ]]; then
         return 1
+    fi
 
     printf '%s\t%s\t%s\t%s\t%s\n' \
         "$url" \
@@ -478,7 +484,9 @@ validate_js_files() {
     while IFS= read -r url; do
         [[ -n "$url" ]] || continue
 
-        if ! validate_url "$url" >> "$output"; then
+        if validate_url "$url" >> "$output"; then
+            log "Accessible: $url"
+        else
             log "Inaccessible: $url"
         fi
     done < "$input"
@@ -489,7 +497,7 @@ validate_js_files() {
         warn "No accessible JavaScript resources found."
 
         if [[ "$IGNORE_CHECK" == false ]]; then
-            warn "Try --ignore-check to skip HTTP validation."
+            warn "Use --ignore-check to skip HTTP validation."
         fi
 
         return 1
@@ -509,34 +517,23 @@ analyze_js() {
     local effective_url="$4"
     local size="$5"
 
-    local safe_id
     local js_file
+    local analysis_file
 
-    safe_id="$(
-        printf '%s' "$url" |
-            sha256sum |
-            awk '{print $1}'
-    )"
-
-    js_file="$TEMP_DIR/js_${safe_id}.js"
+    js_file="$TEMP_DIR/current.js"
+    analysis_file="$TEMP_DIR/analysis.txt"
 
     if ! curl "${CURL_ARGS[@]}" "$url" -o "$js_file" 2>/dev/null; then
         warn "Unable to download: $url"
         return 0
     fi
 
-    [[ -s "$js_file" ]] || return 0
+    if [[ ! -s "$js_file" ]]; then
+        warn "Empty JavaScript response: $url"
+        return 0
+    fi
 
-    {
-        printf '\n============================================================\n'
-        printf 'JS: %s\n' "$url"
-        printf 'HTTP: %s\n' "$status"
-        printf 'Content-Type: %s\n' "$content_type"
-        printf 'Final URL: %s\n' "$effective_url"
-        printf 'Size: %s bytes\n' "$size"
-        printf '============================================================\n'
-
-        python3 - "$js_file" <<'PY_ANALYZE'
+    python3 - "$js_file" > "$analysis_file" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -548,56 +545,59 @@ text = path.read_text(
     errors="ignore",
 )
 
-patterns = [
-    (
-        "Absolute URLs",
-        r'https?://[^"\'\s<>]+|wss?://[^"\'\s<>]+',
+patterns = {
+    "Absolute URLs": r'https?://[^"\'\s<>]+',
+    "WebSocket URLs": r'wss?://[^"\'\s<>]+',
+    "API Endpoints": (
+        r'/(?:api(?:/v\d+)?|graphql)'
+        r'(?:/[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]*)?'
     ),
-    (
-        "Relative API Endpoints",
-        r'/(?:api(?:/v\d+)?|graphql)(?:/[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]*)?',
+    "HTTP Calls": (
+        r'(?:fetch|axios\.(?:get|post|put|patch|delete)|'
+        r'XMLHttpRequest|jQuery\.(?:ajax|get|post))'
+        r'[^;]{0,300}'
     ),
-    (
-        "GraphQL Indicators",
+    "GraphQL Indicators": (
         r'graphql|mutation\s+[A-Za-z_][A-Za-z0-9_]*|'
         r'subscription\s+[A-Za-z_][A-Za-z0-9_]*|'
-        r'query\s+[A-Za-z_][A-Za-z0-9_]*',
+        r'query\s+[A-Za-z_][A-Za-z0-9_]*'
     ),
-    (
-        "WebSocket URLs",
-        r'wss?://[^"\'\s<>]+',
-    ),
-    (
-        "HTTP API Calls",
-        r'(?:fetch|axios\.(?:get|post|put|patch|delete)|'
-        r'XMLHttpRequest|jQuery\.(?:ajax|get|post))[^;]{0,300}',
-    ),
-    (
-        "Source Maps",
-        r'sourceMappingURL\s*=\s*[^\s]+',
-    ),
-    (
-        "Potential Secret Candidates",
+    "Source Maps": r'sourceMappingURL\s*=\s*[^\s]+',
+    "Potential Secret Candidates": (
         r'(?:api[_-]?key|access[_-]?key|secret[_-]?key|'
-        r'client[_-]?secret|private[_-]?key|authorization|bearer|'
-        r'password|token)\s*[:=]\s*["\'][^"\']{8,}["\']',
+        r'client[_-]?secret|private[_-]?key|authorization|'
+        r'bearer|password|token)\s*[:=]\s*'
+        r'["\'][^"\']{8,}["\']'
     ),
-    (
-        "Console / Debug Statements",
-        r'console\.(?:log|warn|error|debug)\s*\([^)]{0,300}\)',
+    "Console / Debug": (
+        r'console\.(?:log|warn|error|debug)\s*\([^)]{0,300}\)'
     ),
-]
+}
 
-for title, pattern in patterns:
+for title, pattern in patterns.items():
     print(f"\n[{title}]")
 
     matches = sorted(
         set(re.findall(pattern, text, re.IGNORECASE))
     )
 
+    if not matches:
+        print("(none)")
+        continue
+
     for match in matches[:100]:
         print(match)
-PY_ANALYZE
+PY
+
+    {
+        printf '\n============================================================\n'
+        printf 'JavaScript: %s\n' "$url"
+        printf 'HTTP Status: %s\n' "$status"
+        printf 'Content-Type: %s\n' "$content_type"
+        printf 'Final URL: %s\n' "$effective_url"
+        printf 'Size: %s bytes\n' "$size"
+        printf '============================================================\n'
+        cat "$analysis_file"
     } >> "$OUTPUT_FILE"
 }
 
@@ -620,8 +620,8 @@ generate_txt_report() {
         printf 'Host: %s\n' "$TARGET_HOST"
         printf 'Generated: %s\n' "$(date -Is)"
 
-        printf '\nJavaScript inventory\n'
-        printf '%s\n' '--------------------'
+        printf '\nJavaScript Inventory\n'
+        printf '%s\n' '===================='
 
         while IFS=$'\t' read -r \
             url \
@@ -642,25 +642,25 @@ generate_txt_report() {
 
         done < "$validated"
 
-        while IFS=$'\t' read -r \
-            url \
-            status \
-            content_type \
-            effective_url \
-            size; do
-
-            analyze_js \
-                "$url" \
-                "$status" \
-                "$content_type" \
-                "$effective_url" \
-                "$size"
-
-        done < "$validated"
-
     } > "$OUTPUT_FILE"
 
-    info "TXT report saved to: $OUTPUT_FILE"
+    while IFS=$'\t' read -r \
+        url \
+        status \
+        content_type \
+        effective_url \
+        size; do
+
+        analyze_js \
+            "$url" \
+            "$status" \
+            "$content_type" \
+            "$effective_url" \
+            "$size"
+
+    done < "$validated"
+
+    info "Report saved to: $OUTPUT_FILE"
 }
 
 # ============================================================================
@@ -687,27 +687,21 @@ generate_jsonl_report() {
 
         python3 \
             - "$url" "$status" "$content_type" "$effective_url" "$size" \
-            <<'PY_JSON' >> "$OUTPUT_FILE"
-
+            <<'PY' >> "$OUTPUT_FILE"
 import json
 import sys
 
 url, status, content_type, effective_url, size = sys.argv[1:]
 
-print(
-    json.dumps(
-        {
-            "type": "javascript",
-            "url": url,
-            "http_status": int(status),
-            "content_type": content_type,
-            "effective_url": effective_url,
-            "size": int(size),
-        },
-        ensure_ascii=False,
-    )
-)
-PY_JSON
+print(json.dumps({
+    "type": "javascript",
+    "url": url,
+    "http_status": int(status),
+    "content_type": content_type,
+    "effective_url": effective_url,
+    "size": int(size),
+}, ensure_ascii=False))
+PY
 
     done < "$validated"
 
@@ -735,14 +729,13 @@ main() {
         warn "TLS certificate verification disabled."
     fi
 
-    discover_js || exit 1
-    validate_js_files || exit 1
+    discover_js
+    validate_js_files
 
     case "$FORMAT" in
         txt)
             generate_txt_report
             ;;
-
         jsonl)
             generate_jsonl_report
             ;;
