@@ -1,3 +1,11 @@
+VERSION="2.0.0"
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ANALYZER="$SCRIPT_DIR/lib/js_analyzer.py"
+
+VERBOSE=false
+IGNORE_CHECK=false
+
 #!/usr/bin/env bash
 
 set -euo pipefail
