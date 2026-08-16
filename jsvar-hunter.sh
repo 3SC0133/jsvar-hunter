@@ -771,8 +771,8 @@ generate_jsonl_report() {
 
     : > "$OUTPUT_FILE"
 
-   while IFS=$'\t' read -r url status content_type effective_url size; do
-        python3 - "$url" "$status" "$content_type" "$effective_url" "$size" <<'PY'
+    while IFS=$'\t' read -r url status content_type effective_url size; do
+        python3 - "$url" "$status" "$content_type" "$effective_url" "$size" <<'PY' >> "$OUTPUT_FILE"
 import json
 import sys
 
@@ -784,19 +784,6 @@ print(json.dumps({
     "http_status": int(status),
     "content_type": content_type,
     "effective_url": effective_url,
-    "size": int(size),
-}, ensure_ascii=False))
-PY
-import json
-import sys
-
-url, status, content_type, size = sys.argv[1:]
-
-print(json.dumps({
-    "type": "javascript",
-    "url": url,
-    "http_status": int(status),
-    "content_type": content_type,
     "size": int(size),
 }, ensure_ascii=False))
 PY
