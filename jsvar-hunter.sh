@@ -579,8 +579,12 @@ validate_url() {
 
     [[ "$status" =~ ^[23][0-9][0-9]$ ]] || return 1
 
-    printf '%s\t%s\t%s\t%s\n' \
-        "$url" "$status" "$content_type" "$size"
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$url" \
+    "$status" \
+    "$content_type" \
+    "$effective_url" \
+    "$size"
 }
 
 # ----------------------------------------------------------------------------
@@ -595,8 +599,6 @@ validate_js_files() {
 
     info "Validating JavaScript resources..."
 
-    export TARGET_HOST
-    export TARGET_BASE
     export TIMEOUT
     export USER_AGENT
     export INSECURE
@@ -605,15 +607,24 @@ validate_js_files() {
     export -f curl_common_args
     export -f validate_url
 
-    xargs -P "$THREADS" -I {} \
-        bash -c 'validate_url "$1"' _ "{}" \
-        < "$input" > "$TEMP_DIR/validation_results.txt" || true
+    : > "$TEMP_DIR/validation_results.txt"
 
-    while IFS=$'\t' read -r url status content_type size; do
+    while IFS= read -r url; do
         [[ -n "$url" ]] || continue
 
-        printf '%s\t%s\t%s\t%s\n' \
-            "$url" "$status" "$content_type" "$size" >> "$output"
+        validate_url "$url" >> "$TEMP_DIR/validation_results.txt" || true
+
+    done < "$input"
+
+    while IFS=$'\t' read -r url status content_type effective_url size; do
+        [[ -n "$url" ]] || continue
+
+        printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$url" \
+            "$status" \
+            "$content_type" \
+            "$effective_url" \
+            "$size" >> "$output"
 
     done < "$TEMP_DIR/validation_results.txt"
 
@@ -735,14 +746,14 @@ generate_txt_report() {
         printf 'JavaScript inventory\n'
         printf '%s\n' '--------------------'
 
-        while IFS=$'\t' read -r url status content_type size; do
+        while IFS=$'\t' read -r url status content_type effective_url size; do
             printf '[%s] %s | %s | %s bytes\n' \
                 "$status" "$url" "$content_type" "$size"
         done < "$validated"
 
         printf '\n'
 
-        while IFS=$'\t' read -r url status content_type size; do
+        while IFS=$'\t' read -r url status content_type effective_url size; do
             analyze_js "$url" "$status" "$content_type" "$size" || true
         done < "$validated"
 
@@ -760,8 +771,22 @@ generate_jsonl_report() {
 
     : > "$OUTPUT_FILE"
 
-    while IFS=$'\t' read -r url status content_type size; do
-        python3 - "$url" "$status" "$content_type" "$size" <<'PY' >> "$OUTPUT_FILE"
+   while IFS=$'\t' read -r url status content_type effective_url size; do
+        python3 - "$url" "$status" "$content_type" "$effective_url" "$size" <<'PY'
+import json
+import sys
+
+url, status, content_type, effective_url, size = sys.argv[1:]
+
+print(json.dumps({
+    "type": "javascript",
+    "url": url,
+    "http_status": int(status),
+    "content_type": content_type,
+    "effective_url": effective_url,
+    "size": int(size),
+}, ensure_ascii=False))
+PY
 import json
 import sys
 
