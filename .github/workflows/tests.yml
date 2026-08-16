@@ -1,0 +1,23 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run test suite
+        run: |
+          chmod +x jsvar-hunter.sh tests/test.sh
+          ./tests/test.sh
